@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  build-and-release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,31 +17,22 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.26'
+          cache-dependency-path: secureboot_cert_update/go.sum
 
       - name: Build Windows binaries
         run: |
           cd secureboot_cert_update
-          go mod tidy
-          make windows
+          make deps
+          make build
 
-      - name: Upload Windows binaries as artifacts
+      - name: Upload binaries as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: secureboot_cert_update-windows-binaries
+          name: secureboot_cert_update-binaries
           path: |
             secureboot_cert_update/secureboot_cert_update-amd64.exe
             secureboot_cert_update/secureboot_cert_update-arm64.exe
-
-  release:
-    needs: [build-windows]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -51,13 +42,27 @@ jobs:
           body: |
             This release includes updated binaries for the following extensions:
 
-            | Extension                | Built in this release |
-            |--------------------------|----------------------|
-            | secureboot_cert_update   | ✅                   |
+            | Extension                 | Built in this release |
+            |---------------------------|----------------------|
+            | apple_network_quality     |                      |
+            | brew_list                 |                      |
+            | brew_outdated             |                      |
+            | homebrew_info             |                      |
+            | local_network_permissions |                      |
+            | macos_compatibility       |                      |
+            | mise                      |                      |
+            | msft_defender             |                      |
+            | nuget_packages            |                      |
+            | santa                     |                      |
+            | secureboot_cert_update    | ✅                    |
+            | snap_packages             |                      |
+            | softwareupdate            |                      |
+            | system_profiler           |                      |
+            | ubuntu_pro                |                      |
 
             See attached assets for binaries.
           files: |
-            ./artifacts/**/secureboot_cert_update-amd64.exe
-            ./artifacts/**/secureboot_cert_update-arm64.exe
+            secureboot_cert_update/secureboot_cert_update-amd64.exe
+            secureboot_cert_update/secureboot_cert_update-arm64.exe
           draft: false
           prerelease: false

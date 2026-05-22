@@ -1,6 +1,6 @@
 module local_network_permissions
 
-go 1.21
+go 1.26
 
 require (
 	github.com/micromdm/plist v0.2.3-0.20260123201933-667adaf87d87

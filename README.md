@@ -17,6 +17,7 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 | [local_network_permissions](local_network_permissions/README.md) | macOS Local Network Privacy permissions as a native osquery table | macOS |
 | [brew_outdated](brew_outdated/README.md)           | Quickly surface out-of-date Homebrew packages | macOS |
 | [softwareupdate](softwareupdate/README.md)         | Pending Apple software updates from `softwareupdate --list` | macOS |
+| [secureboot_cert_update](secureboot_cert_update/README.md) | Secure Boot 2023 certificate rollout status and recommended actions | Windows |
 
 ## Extension Details
 
@@ -83,6 +84,12 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 - **Binaries:** `softwareupdate-x86_64.ext`, `softwareupdate-arm64.ext`, `softwareupdate.ext`
 - **Tables:** `softwareupdate`
 
+### [secureboot_cert_update](secureboot_cert_update/README.md)
+- **Description:** Surfaces a device's progress through Microsoft's Secure Boot 2023 certificate rollout, including derived state, recommended actions, and registry/event-log signals.
+- **Platforms:** Windows (amd64, arm64)
+- **Binaries:** `secureboot_cert_update-amd64.exe`, `secureboot_cert_update-arm64.exe`
+- **Tables:** `secureboot_cert_update`
+
 ## Automated Builds
 
 This repository uses GitHub Actions to automatically build and release extensions when changes are pushed to the `main` branch. Each extension has its own workflow that:
@@ -124,7 +131,14 @@ Each extension is self-contained in its own directory. To build an extension:
      ```
      This produces:
      - `brew_list.ext` (works on macOS and Linux with Homebrew/Linuxbrew)
-   - For **Windows extension** (`nuget_packages`):
+   - For **Windows-only extension** (`secureboot_cert_update`):
+     ```bash
+     make build
+     ```
+     This produces:
+     - `secureboot_cert_update-amd64.exe` (for 64-bit Intel/AMD Windows)
+     - `secureboot_cert_update-arm64.exe` (for 64-bit ARM Windows)
+   - For **Windows binaries from cross-platform extension** (`nuget_packages`):
      ```bash
      make windows
      ```

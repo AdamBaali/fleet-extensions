@@ -1,6 +1,6 @@
 module softwareupdate
 
-go 1.24.4
+go 1.26
 
 require github.com/osquery/osquery-go v0.0.0-20250131154556-629f995b6947
 
