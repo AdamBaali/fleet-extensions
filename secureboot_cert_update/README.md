@@ -1,4 +1,4 @@
-# Secure Boot Cert Update Osquery Extension (Go)
+# Secure Boot Cert Update Osquery Extension
 
 A Windows-only osquery extension that surfaces a device's progress through Microsoft's [Secure Boot 2023 certificate rollout](https://techcommunity.microsoft.com/blog/windows-itpro-blog/secure-boot-playbook-for-certificates-expiring-in-2026/4469235). The 2011-era Secure Boot certificates pre-loaded into every UEFI Windows PC since ~2012 expire starting June 2026.
 
