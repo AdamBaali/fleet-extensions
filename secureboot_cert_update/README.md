@@ -98,19 +98,10 @@ make deps
 make windows
 ```
 
-## Usage
-
-### With Fleet
+## Usage with Fleet
 
 ```powershell
-orbit shell.exe -- --extension secureboot_cert_update-amd64.exe --allow-unsafe
-```
-
-### With standalone osquery
-
-```powershell
-C:\Program Files\Orbit\bin\orbit\orbit.exe" shell --
-osqueryi.exe --extension=C:\path\to\secureboot_cert_update-amd64.exe
+'C:\Program Files\Orbit\bin\orbit\orbit.exe' shell -- --extension .\secureboot_cert_update-amd64.exe --allow-unsafe
 ```
 
 ## Example queries
