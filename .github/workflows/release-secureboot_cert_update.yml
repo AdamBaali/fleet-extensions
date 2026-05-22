@@ -1,0 +1,63 @@
+name: Release secureboot_cert_update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'secureboot_cert_update/**'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build Windows binaries
+        run: |
+          cd secureboot_cert_update
+          go mod tidy
+          make windows
+
+      - name: Upload Windows binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: secureboot_cert_update-windows-binaries
+          path: |
+            secureboot_cert_update/secureboot_cert_update-amd64.exe
+            secureboot_cert_update/secureboot_cert_update-arm64.exe
+
+  release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Fleet Extensions Release
+          body: |
+            This release includes updated binaries for the following extensions:
+
+            | Extension                | Built in this release |
+            |--------------------------|----------------------|
+            | secureboot_cert_update   | ✅                   |
+
+            See attached assets for binaries.
+          files: |
+            ./artifacts/**/secureboot_cert_update-amd64.exe
+            ./artifacts/**/secureboot_cert_update-arm64.exe
+          draft: false
+          prerelease: false
