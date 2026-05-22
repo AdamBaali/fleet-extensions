@@ -50,7 +50,7 @@ A short-circuit ladder — first match wins, evaluated top to bottom.
 | `ServicingBroken` | Scheduled task disabled or `WinCSKeyApplied = 0`. Rollout infrastructure itself is wrong. | 1 |
 | `Unknown` | Could not read enough state to classify (e.g. servicing key not present yet). | 0 |
 
-### Raw playbook signals
+### Raw data
 
 These mirror the registry/event-log fields Microsoft's [Detect-SecureBootCertUpdateStatus.ps1](https://support.microsoft.com/en-us/topic/registry-key-updates-for-secure-boot-windows-devices-with-it-managed-updates-fdc97f0d-eb30-432a-8c43-be8de2a93d6c) reads. Use them for forensics when the derived `state` isn't enough.
 
@@ -120,6 +120,7 @@ SELECT
   oem_manufacturer_name, oem_model_number, firmware_version
 FROM secureboot_cert_update
 WHERE needs_action = 1;
+```
 
 ## Structure
 
