@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -37,8 +36,6 @@ const (
 	regSecureBoot          = `SYSTEM\CurrentControlSet\Control\SecureBoot`
 	regSecureBootServicing = `SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing`
 	regSecureBootState     = `SYSTEM\CurrentControlSet\Control\SecureBoot\State`
-	regBIOSInfo            = `HARDWARE\DESCRIPTION\System\BIOS`
-	regOSCurrentVersion    = `SOFTWARE\Microsoft\Windows NT\CurrentVersion`
 
 	scheduledTaskPath = `\Microsoft\Windows\PI\Secure-Boot-Update`
 )
@@ -110,19 +107,6 @@ func columns() []table.ColumnDefinition {
 		table.TextColumn("last_boot_time"),
 		table.TextColumn("collection_time"),
 
-		// Identity
-		table.TextColumn("oem_name"),
-		table.TextColumn("oem_manufacturer_name"),
-		table.TextColumn("oem_model_system_family"),
-		table.TextColumn("oem_model_number"),
-		table.TextColumn("firmware_manufacturer"),
-		table.TextColumn("firmware_version"),
-		table.TextColumn("firmware_release_date"),
-		table.TextColumn("baseboard_manufacturer"),
-		table.TextColumn("baseboard_product"),
-		table.TextColumn("os_version"),
-		table.TextColumn("os_architecture"),
-
 		// Cert lifecycle
 		table.TextColumn("cert_kek_2011_expires_at"),
 		table.TextColumn("cert_uefi_ca_2011_expires_at"),
@@ -146,11 +130,11 @@ type collected struct {
 	highConfidenceOptOut        bool
 	microsoftUpdateManagedOptIn bool
 
-	bucketHash                  string
-	confidenceLevel             string
-	windowsUEFICA2023Capable    *bool
-	skipReasonKnownIssue        string
-	canAttemptUpdateAfter       string
+	bucketHash               string
+	confidenceLevel          string
+	windowsUEFICA2023Capable *bool
+	skipReasonKnownIssue     string
+	canAttemptUpdateAfter    string
 
 	wincsKeyStatus  string
 	wincsKeyApplied bool
@@ -167,18 +151,6 @@ type collected struct {
 
 	lastBootTime   time.Time
 	collectionTime time.Time
-
-	oemName             string
-	oemManufacturer     string
-	oemSystemFamily     string
-	oemModelNumber      string
-	firmwareManufact    string
-	firmwareVersion     string
-	firmwareReleaseDt   string
-	baseboardManufact   string
-	baseboardProduct    string
-	osVersion           string
-	osArchitecture      string
 }
 
 func generate(ctx context.Context, q table.QueryContext) ([]map[string]string, error) {
@@ -188,8 +160,6 @@ func generate(ctx context.Context, q table.QueryContext) ([]map[string]string, e
 	collectRegistryServicing(c)
 	collectRegistryDeviceAttributes(c)
 	collectRegistryState(c)
-	collectRegistryBIOS(c)
-	collectRegistryOS(c)
 	collectScheduledTask(c)
 	collectKernelBootEvents(c)
 	collectLastBoot(c)
@@ -225,22 +195,10 @@ func generate(ctx context.Context, q table.QueryContext) ([]map[string]string, e
 		"last_boot_time":                 timeOrEmpty(c.lastBootTime),
 		"collection_time":                c.collectionTime.Format(time.RFC3339),
 
-		"oem_name":                c.oemName,
-		"oem_manufacturer_name":   c.oemManufacturer,
-		"oem_model_system_family": c.oemSystemFamily,
-		"oem_model_number":        c.oemModelNumber,
-		"firmware_manufacturer":   c.firmwareManufact,
-		"firmware_version":        c.firmwareVersion,
-		"firmware_release_date":   c.firmwareReleaseDt,
-		"baseboard_manufacturer":  c.baseboardManufact,
-		"baseboard_product":       c.baseboardProduct,
-		"os_version":              c.osVersion,
-		"os_architecture":         c.osArchitecture,
-
-		"cert_kek_2011_expires_at":          certKEK2011Expires.Format(time.RFC3339),
-		"cert_uefi_ca_2011_expires_at":      certUEFICA2011Expires.Format(time.RFC3339),
-		"cert_windows_pca_2011_expires_at":  certWindowsPCA2011Expires.Format(time.RFC3339),
-		"extension_schema_version":          extensionSchemaVersion,
+		"cert_kek_2011_expires_at":         certKEK2011Expires.Format(time.RFC3339),
+		"cert_uefi_ca_2011_expires_at":     certUEFICA2011Expires.Format(time.RFC3339),
+		"cert_windows_pca_2011_expires_at": certWindowsPCA2011Expires.Format(time.RFC3339),
+		"extension_schema_version":         extensionSchemaVersion,
 	}
 
 	if c.secureBootEnabled != nil {
@@ -306,9 +264,10 @@ func collectRegistryServicing(c *collected) {
 	}
 }
 
-// regSecureBootDeviceAttributes holds the Microsoft-curated OEM identity that
-// the Secure Boot servicing stack uses for bucketing, plus the binary
-// CanAttemptUpdateAfter FILETIME.
+// regSecureBootDeviceAttributes holds the binary CanAttemptUpdateAfter FILETIME
+// alongside the OEM identity values the rollout uses for bucketing. We only
+// read the timestamp here — hardware identity (vendor, model, BIOS, OS) is
+// available from osquery's built-in tables.
 const regSecureBootDeviceAttributes = regSecureBootServicing + `\DeviceAttributes`
 
 func collectRegistryDeviceAttributes(c *collected) {
@@ -317,19 +276,6 @@ func collectRegistryDeviceAttributes(c *collected) {
 		return
 	}
 	defer k.Close()
-
-	c.oemName, _, _ = k.GetStringValue("OEMName")
-	c.oemManufacturer, _, _ = k.GetStringValue("OEMManufacturerName")
-	c.oemSystemFamily, _, _ = k.GetStringValue("OEMModelSystemFamily")
-	c.oemModelNumber, _, _ = k.GetStringValue("OEMModelNumber")
-	c.firmwareManufact, _, _ = k.GetStringValue("FirmwareManufacturer")
-	c.firmwareVersion, _, _ = k.GetStringValue("FirmwareVersion")
-	c.firmwareReleaseDt, _, _ = k.GetStringValue("FirmwareReleaseDate")
-	c.baseboardManufact, _, _ = k.GetStringValue("BaseBoardManufacturer")
-	c.baseboardProduct, _, _ = k.GetStringValue("OEMModelBaseBoard")
-	if v, _, err := k.GetStringValue("OSArchitecture"); err == nil && v != "" {
-		c.osArchitecture = v
-	}
 
 	if b, _, err := k.GetBinaryValue("CanAttemptUpdateAfter"); err == nil && len(b) > 0 {
 		c.canAttemptUpdateAfter = formatCanAttemptUpdateAfter(b)
@@ -374,71 +320,6 @@ func collectRegistryState(c *collected) {
 		b := v != 0
 		c.secureBootEnabled = &b
 	}
-}
-
-// collectRegistryBIOS only fills identity fields that weren't already populated
-// by the Servicing\DeviceAttributes subkey — that subkey isn't present on
-// devices that haven't received the Secure Boot rollout payload yet, and the
-// BIOS subkey is the universal fallback.
-func collectRegistryBIOS(c *collected) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, regBIOSInfo, registry.QUERY_VALUE)
-	if err != nil {
-		return
-	}
-	defer k.Close()
-	fillIfEmpty(&c.oemManufacturer, k, "SystemManufacturer")
-	fillIfEmpty(&c.oemSystemFamily, k, "SystemFamily")
-	fillIfEmpty(&c.oemModelNumber, k, "SystemProductName")
-	fillIfEmpty(&c.firmwareVersion, k, "BIOSVersion")
-	fillIfEmpty(&c.firmwareReleaseDt, k, "BIOSReleaseDate")
-	fillIfEmpty(&c.baseboardManufact, k, "BaseBoardManufacturer")
-	fillIfEmpty(&c.baseboardProduct, k, "BaseBoardProduct")
-}
-
-func fillIfEmpty(dst *string, k registry.Key, name string) {
-	if *dst != "" {
-		return
-	}
-	if v, _, err := k.GetStringValue(name); err == nil {
-		*dst = v
-	}
-}
-
-func collectRegistryOS(c *collected) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, regOSCurrentVersion, registry.QUERY_VALUE)
-	if err != nil {
-		return
-	}
-	defer k.Close()
-	productName, _, _ := k.GetStringValue("ProductName")
-	displayVersion, _, _ := k.GetStringValue("DisplayVersion")
-	buildLab, _, _ := k.GetStringValue("BuildLabEx")
-	parts := []string{}
-	if productName != "" {
-		parts = append(parts, productName)
-	}
-	if displayVersion != "" {
-		parts = append(parts, displayVersion)
-	}
-	if buildLab != "" {
-		parts = append(parts, "build "+buildLab)
-	}
-	c.osVersion = strings.Join(parts, " ")
-	if c.osArchitecture == "" {
-		if arch := envProcArch(); arch != "" {
-			c.osArchitecture = arch
-		}
-	}
-}
-
-func envProcArch() string {
-	// On 64-bit Windows, PROCESSOR_ARCHITECTURE is "AMD64" or "ARM64".
-	for _, name := range []string{"PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432"} {
-		if v, ok := os.LookupEnv(name); ok && v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func collectScheduledTask(c *collected) {
@@ -528,8 +409,8 @@ $evts | ForEach-Object {
 }
 
 var (
-	kernel32DLL      = windows.NewLazySystemDLL("kernel32.dll")
-	procTickCount64  = kernel32DLL.NewProc("GetTickCount64")
+	kernel32DLL     = windows.NewLazySystemDLL("kernel32.dll")
+	procTickCount64 = kernel32DLL.NewProc("GetTickCount64")
 )
 
 func collectLastBoot(c *collected) {

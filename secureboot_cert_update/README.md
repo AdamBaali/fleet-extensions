@@ -1,24 +1,38 @@
 # Secure Boot Cert Update Osquery Extension (Go)
 
-A Windows-only osquery extension that surfaces a device's progress through Microsoft's [Secure Boot 2023 certificate rollout](https://techcommunity.microsoft.com/blog/windows-itpro-blog/secure-boot-playbook-for-certificates-expiring-in-2026/4469235). The 2011-era Secure Boot certificates pre-loaded into every UEFI Windows PC since ~2012 expire starting June 2026; this table tells you, fleet-wide, which devices have already rolled to the 2023 certs and which need attention.
-
-It's a read-only table — it does not enroll certificates or modify any registry values.
+A Windows-only osquery extension that surfaces a device's progress through Microsoft's [Secure Boot 2023 certificate rollout](https://techcommunity.microsoft.com/blog/windows-itpro-blog/secure-boot-playbook-for-certificates-expiring-in-2026/4469235). The 2011-era Secure Boot certificates pre-loaded into every UEFI Windows PC since ~2012 expire starting June 2026.
 
 ## Table: `secureboot_cert_update`
 
-One row per device. Columns are grouped into derived state, raw playbook signals, hardware identity, and cert lifecycle.
-
 ### Derived state
-
-The whole point of the extension. Compute once on the device; query simply in SQL.
 
 | Column                   | Type    | Description |
 |--------------------------|---------|-------------|
-| `state`                  | TEXT    | One of the values in the table below |
+| `state`                  | TEXT    | See the table below for logic on how this value is calculated |
 | `state_reason`           | TEXT    | Short human-readable explanation |
 | `needs_action`           | INTEGER | 1 if an admin should look at this device |
 | `action`                 | TEXT    | Recommended next step: `none`, `wait`, `reboot`, `enable_secure_boot`, `apply_manual_override`, `oem_firmware_required`, `investigate` |
 | `days_until_cert_expiry` | INTEGER | Days until the first 2011 cert expires (KEK CA, June 24 2026) |
+
+## How `state` is derived
+
+A short-circuit ladder — first match wins, evaluated top to bottom.
+
+| # | State | Trigger |
+|---|-------|---------|
+| 1 | `SecureBootDisabled` | `secureboot_enabled = 0` |
+| 2 | `Updated` | `uefica2023_status = "Updated"` |
+| 3 | `BlockedOEMMissingKEK` | Event 1803 seen → `missing_kek = 1` |
+| 4 | `BlockedKnownIssue` | Event 1802 seen → `known_issue_id` populated |
+| 5 | `BlockedFirmwareError` | `uefica2023_error` non-empty |
+| 6 | `RebootPending` | Event 1800/1801 seen → `reboot_pending = 1` |
+| 7 | `InProgress` | `available_updates != 0` and `uefica2023_status != "NotStarted"` |
+| 8 | `ServicingBroken` | Scheduled task disabled, or `wincs_key_applied = 0` |
+| 9 | `OptedOut` | `high_confidence_optout = 1` |
+| 10 | `WaitingOnRollout` | `uefica2023_status = "NotStarted"` or `confidence_level` contains "observation" |
+| 11 | `Unknown` | Nothing above matched |
+
+`needs_action = 1` for `SecureBootDisabled`, `BlockedOEMMissingKEK`, `BlockedKnownIssue`, `BlockedFirmwareError`, and `ServicingBroken`. All other states are monitor-only.
 
 #### `state` values
 
@@ -49,11 +63,10 @@ These mirror the registry/event-log fields Microsoft's [Detect-SecureBootCertUpd
 | `available_updates_policy` | `HKLM\...\SecureBoot` → `AvailableUpdatesPolicy` (hex) |
 | `high_confidence_optout` | `HKLM\...\SecureBoot` → `HighConfidenceOptOut` |
 | `microsoft_update_managed_optin` | `HKLM\...\SecureBoot` → `MicrosoftUpdateManagedOptIn` |
-| `bucket_hash` | `HKLM\...\SecureBoot\Servicing` → `BucketHash` |
-| `confidence_level` | `HKLM\...\SecureBoot\Servicing` → `ConfidenceLevel` |
-| `windows_uefica2023_capable` | `HKLM\...\SecureBoot\Servicing` → `WindowsUEFICA2023Capable` |
+| `bucket_id` | `HKLM\...\SecureBoot\Servicing` → `BucketId` |
+| `confidence` | `HKLM\...\SecureBoot\Servicing` → `Confidence` |
 | `skip_reason_known_issue` | `HKLM\...\SecureBoot\Servicing` → `SkipReasonKnownIssue` |
-| `can_attempt_update_after` | `HKLM\...\SecureBoot\Servicing\DeviceAttributes` → `CanAttemptUpdateAfter` (REG_BINARY; decoded as FILETIME when 8 bytes, else hex) |
+| `can_attempt_update_after` | `HKLM\...\SecureBoot\Servicing` → `CanAttemptUpdateAfter` |
 | `secureboot_task_status` | `schtasks /Query` against `\Microsoft\Windows\PI\Secure-Boot-Update` |
 | `secureboot_task_enabled` | Same task — `Scheduled Task State = Enabled` |
 | `wincs_key_status` | `HKLM\...\SecureBoot\Servicing` → `WinCSKeyStatus` |
@@ -65,24 +78,6 @@ These mirror the registry/event-log fields Microsoft's [Detect-SecureBootCertUpd
 | `latest_event_time` | Timestamp of `latest_event_id` |
 | `last_boot_time` | Now minus `GetTickCount64()` |
 | `collection_time` | When this row was produced |
-
-### Hardware identity
-
-Useful for fleet-wide `GROUP BY` to spot OEM/firmware combinations stuck on the same bucket. The Microsoft-curated values under `\Servicing\DeviceAttributes` are preferred; the `\HARDWARE\DESCRIPTION\System\BIOS` subkey is the fallback when the rollout hasn't populated `DeviceAttributes` yet.
-
-| Column | Primary source | Fallback |
-|--------|----------------|----------|
-| `oem_name` | `…\Servicing\DeviceAttributes` → `OEMName` | — |
-| `oem_manufacturer_name` | `…\DeviceAttributes` → `OEMManufacturerName` | `…\BIOS` → `SystemManufacturer` |
-| `oem_model_system_family` | `…\DeviceAttributes` → `OEMModelSystemFamily` | `…\BIOS` → `SystemFamily` |
-| `oem_model_number` | `…\DeviceAttributes` → `OEMModelNumber` | `…\BIOS` → `SystemProductName` |
-| `firmware_manufacturer` | `…\DeviceAttributes` → `FirmwareManufacturer` | — |
-| `firmware_version` | `…\DeviceAttributes` → `FirmwareVersion` | `…\BIOS` → `BIOSVersion` |
-| `firmware_release_date` | `…\DeviceAttributes` → `FirmwareReleaseDate` | `…\BIOS` → `BIOSReleaseDate` |
-| `baseboard_manufacturer` | `…\DeviceAttributes` → `BaseBoardManufacturer` | `…\BIOS` → `BaseBoardManufacturer` |
-| `baseboard_product` | `…\DeviceAttributes` → `OEMModelBaseBoard` | `…\BIOS` → `BaseBoardProduct` |
-| `os_version` | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` | — |
-| `os_architecture` | `…\DeviceAttributes` → `OSArchitecture` | `PROCESSOR_ARCHITECTURE` env var |
 
 ### Cert lifecycle
 
@@ -103,11 +98,6 @@ make deps
 make windows
 ```
 
-Produces:
-
-- `secureboot_cert_update-amd64.exe` — 64-bit Intel/AMD Windows
-- `secureboot_cert_update-arm64.exe` — 64-bit ARM Windows
-
 ## Usage
 
 ### With Fleet
@@ -116,11 +106,10 @@ Produces:
 orbit shell.exe -- --extension secureboot_cert_update-amd64.exe --allow-unsafe
 ```
 
-For daily collection across a fleet, deploy the `.exe` to `C:\Program Files\Orbit\osquery_extensions\` (or your equivalent) and configure Fleet's extensions autoload.
-
 ### With standalone osquery
 
 ```powershell
+C:\Program Files\Orbit\bin\orbit\orbit.exe" shell --
 osqueryi.exe --extension=C:\path\to\secureboot_cert_update-amd64.exe
 ```
 
@@ -140,46 +129,6 @@ SELECT
   oem_manufacturer_name, oem_model_number, firmware_version
 FROM secureboot_cert_update
 WHERE needs_action = 1;
-```
-
-```sql
--- Which OEMs are the long pole (devices stuck on missing-KEK firmware)
-SELECT
-  oem_manufacturer_name, oem_model_number, firmware_version,
-  COUNT(*) AS affected
-FROM secureboot_cert_update
-WHERE state = 'BlockedOEMMissingKEK'
-GROUP BY 1, 2, 3
-ORDER BY affected DESC;
-```
-
-```sql
--- Buckets stuck in observation that could be unblocked by manual override
-SELECT
-  bucket_hash, confidence_level, oem_model_number, firmware_version,
-  COUNT(*) AS device_count
-FROM secureboot_cert_update
-WHERE state = 'WaitingOnRollout'
-GROUP BY bucket_hash, oem_model_number, firmware_version
-HAVING device_count > 5
-ORDER BY device_count DESC;
-```
-
-```sql
--- Stragglers within 60 days of first cert expiry
-SELECT hostname, state, state_reason
-FROM secureboot_cert_update
-WHERE state NOT IN ('Updated', 'Unknown')
-  AND days_until_cert_expiry < 60;
-```
-
-## Permissions
-
-Requires the rights normally granted to osqueryd:
-
-- **Registry**: `HKLM\SYSTEM\CurrentControlSet\Control\SecureBoot` and `\Servicing` are readable by `Authenticated Users`; no elevation needed.
-- **Scheduled task query**: `schtasks /Query` against `\Microsoft\Windows\PI\Secure-Boot-Update` works for any local user.
-- **Event log**: `Get-WinEvent` against `System` requires membership in `Event Log Readers` (or SYSTEM/Administrator). When osqueryd runs as `LocalSystem` (the default Fleet/orbit configuration) this is fine; if you ever test the extension interactively as a normal user, event-derived columns (`missing_kek`, `known_issue_id`, `latest_event_*`) will be empty and the state may degrade to `Unknown`.
 
 ## Structure
 
