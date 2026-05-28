@@ -106,7 +106,7 @@ Use the included `install-secureboot-cert-update-extension.ps1` via Fleet's scri
 powershell -ExecutionPolicy Bypass -File .\install-secureboot-cert-update-extension.ps1
 ```
 
-The installer downloads the architecture-matching binary from this repo's latest release, verifies its SHA-256, places it under `C:\Program Files\osquery\extensions\`, adds the path to `C:\Program Files\osquery\extensions.load`, hardens the ACLs, and restarts the `Fleet osquery` service. Idempotent: rerunning is a no-op when the binary already matches.
+The installer downloads the architecture-matching binary from this repo's latest release, validates the PE header, places it under `C:\Program Files\osquery\extensions\`, adds the path to `C:\Program Files\osquery\extensions.load`, hardens the ACLs, and restarts the `Fleet osquery` service. CI republishes the release on push to `main`, so the installer never needs editing when the binary changes.
 
 ## Usage with Fleet
 

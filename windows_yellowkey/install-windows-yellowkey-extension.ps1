@@ -3,55 +3,43 @@
     Installs and loads the windows_yellowkey osquery extension on this host.
 
 .DESCRIPTION
-    Idempotent installer for the windows_yellowkey osquery extension under
-    fleetd on Windows. Mirrors the Linux/macOS installers in this repo:
-    download the architecture-matching binary, place it where osquery's
-    compiled-default autoload path will pick it up, and restart the service.
+    Downloads the architecture-matching binary from this repo's latest
+    release, places it under C:\Program Files\osquery\extensions\, adds the
+    path to C:\Program Files\osquery\extensions.load, and restarts the
+    Fleet osquery service. Idempotent: rerunning re-asserts the loader and
+    ACLs.
 
-    The script writes to osquery's compiled-in default autoload path on
-    Windows: `C:\Program Files\osquery\extensions.load`. orbit owns its own
-    <root-dir>\extensions.load and only passes --extensions_autoload to osqueryd
-    when that file is non-empty; ExtensionRunner keeps it empty unless Fleet
-    has TUF-managed extensions configured. With nothing forcing a different
-    autoload path, osqueryd falls back to its compiled default and reads our
-    file. This is the Windows twin of the Linux/macOS pattern, which writes
-    to /etc/osquery/extensions.load and /var/osquery/extensions.load.
+    Pattern mirrors the Linux installers in this repo (snap_packages,
+    ubuntu_pro) adapted for Windows: no SHA pinning in source, always pull
+    the latest release. The CI workflow republishes binaries on push to
+    main, so the install script never needs touching.
 
-    Flow:
-      1. Pre-flight: Fleet osquery service present.
-      2. Pick the URL and SHA-256 for this host's architecture.
-      3. Ensure C:\Program Files\osquery\extensions exists, harden its ACL.
-      4. Download the binary to a temp path, verify SHA-256, move into place.
-      5. Harden the binary ACL.
-      6. Add the binary path to C:\Program Files\osquery\extensions.load
-         (idempotent), harden that file.
-      7. Restart the Fleet osquery service so osqueryd autoloads the extension.
+    Windows specifics not present in the Linux versions:
+      - Stops the Fleet osquery service and kills the lingering extension
+        child before overwriting the .exe (Windows holds file locks on
+        loaded modules).
+      - Hardens the ACL on the binary, extensions directory, and loader to
+        owner Administrators, full control for SYSTEM + Administrators,
+        read+execute for Users. Re-asserted on every run.
+      - Writes the loader file as ASCII with no BOM; a UTF-16 or UTF-8-BOM
+        loader makes osquery silently skip every entry.
+
+    Writes to osquery's compiled-in default autoload path on Windows
+    (C:\Program Files\osquery\extensions.load) so osqueryd autoloads the
+    extension when orbit does not pass --extensions_autoload. Twin of the
+    Linux installers that write to /etc/osquery/extensions.load.
 
 .OUTPUTS
-    Structured key:value output to stdout for log capture.
+    Structured key:value output to stdout.
 
 .NOTES
     Exit codes:
-      0 = Installed; service back to Running, extension will load on next start
+      0 = Installed; service back to Running
       3 = Fleet osquery service not present
       4 = Filesystem operation failed (directory, move, loader write, ACL)
       5 = Service did not return to Running after restart
-      6 = Download failed
-      7 = Downloaded file failed SHA-256 verification
+      6 = Download failed or asset is not a valid PE32+ executable
       8 = Unsupported architecture
-
-    Update workflow:
-      1. CI rebuilds the binaries on push to main in this repo.
-      2. After CI publishes, bump $ExtensionVersion and both $Builds entries'
-         Sha values to match the new committed binaries.
-      3. Open a PR. On merge, failing hosts pull the new binary on the next
-         policy run.
-
-    References:
-      Fleet guide: https://fleetdm.com/guides/deploying-custom-osquery-extensions-in-fleet-a-step-by-step-guide
-      Compiled default path: osquery's default_paths.h, OSQUERY_HOME for WIN32
-        = "\\Program Files\\osquery\\". --extensions_autoload defaults to
-        OSQUERY_HOME "extensions.load" in osquery/extensions/extensions.cpp.
 #>
 
 [CmdletBinding()]
@@ -60,31 +48,26 @@ param()
 $ErrorActionPreference = 'Stop'
 
 # ============================================================================
-# Extension identity. Bump $ExtensionVersion and both $Builds[*].Sha values
-# together when the committed binaries change.
+# Extension identity. Binaries are produced by this repo's CI on push to main
+# and attached to the `latest` release; this script always pulls from there,
+# so no version or hash needs bumping in source when CI republishes.
 # ============================================================================
-$ExtensionName    = 'windows_yellowkey'
-$ExtensionVersion = '1.0.2'
-$BaseUrl          = 'https://raw.githubusercontent.com/allenhouchins/fleet-extensions/main/windows_yellowkey'
+$ExtensionName = 'windows_yellowkey'
+$GithubRepo    = 'allenhouchins/fleet-extensions'
+$BaseUrl       = "https://github.com/$GithubRepo/releases/latest/download"
 
-$Builds = @{
-    'AMD64' = @{
-        Asset = 'windows_yellowkey-amd64.exe'
-        Sha   = 'C1561C2EDD23CF59506C9D38689EE501B37F463A62E15F766C4A6278BDDE0899'
-    }
-    'ARM64' = @{
-        Asset = 'windows_yellowkey-arm64.exe'
-        Sha   = '5C98F59CD01130CFCABC7DD9E581B787565A411543E4DEDBAAADC5D87A399411'
-    }
+$Assets = @{
+    'AMD64' = 'windows_yellowkey-amd64.exe'
+    'ARM64' = 'windows_yellowkey-arm64.exe'
 }
 # ============================================================================
 
 # Match osquery's compiled default on Windows so osqueryd autoloads us when
-# orbit does not pass --extensions_autoload (osquery/utils/config/default_paths.h
-# defines OSQUERY_HOME as "\\Program Files\\osquery\\" on WIN32).
+# orbit does not pass --extensions_autoload.
 $OsqueryHome   = 'C:\Program Files\osquery'
 $ExtensionsDir = Join-Path $OsqueryHome 'extensions'
 $ExtensionPath = Join-Path $ExtensionsDir "$ExtensionName.ext.exe"
+$BackupPath    = "$ExtensionPath.backup.$(Get-Date -Format 'yyyyMMdd_HHmmss')"
 $LoaderPath    = Join-Path $OsqueryHome 'extensions.load'
 $ServiceName   = 'Fleet osquery'
 
@@ -94,11 +77,9 @@ function Write-State {
 }
 
 function Set-HardenedAcl {
-    # Reset $Path to: owner Administrators, no inherited ACEs, full control for
-    # SYSTEM and Administrators, read+execute for Users. Re-asserted on every
-    # run so a drifted host (Group Policy churn, manual edits) self-heals.
-    # Well-known SIDs are used instead of names so this works on non-English
-    # Windows.
+    # Owner Administrators, no inherited ACEs, full control for SYSTEM and
+    # Administrators, read+execute for Users. Well-known SIDs so this works
+    # on non-English Windows.
     param([string]$Path, [bool]$IsDirectory)
 
     $systemSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
@@ -106,7 +87,6 @@ function Set-HardenedAcl {
     $usersSid  = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
 
     $acl = Get-Acl -Path $Path
-    # Disable inheritance, drop inherited ACEs (false = do not preserve).
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($r in @($acl.Access)) { [void]$acl.RemoveAccessRule($r) }
     $acl.SetOwner($adminsSid)
@@ -128,6 +108,24 @@ function Set-HardenedAcl {
     Set-Acl -Path $Path -AclObject $acl
 }
 
+function Test-WindowsExecutable {
+    # Sanity check: file is non-empty and starts with the MZ DOS stub that
+    # every PE32+ binary opens with. Cheap, catches HTML 404 pages and
+    # truncated downloads.
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return $false }
+    if ((Get-Item $Path).Length -lt 1024) { return $false }
+    $bytes = [byte[]]::new(2)
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        [void]$stream.Read($bytes, 0, 2)
+    } finally {
+        $stream.Dispose()
+    }
+    return ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A)
+}
+
 Write-Output "=== $ExtensionName extension installer ==="
 Write-Output ""
 
@@ -140,14 +138,13 @@ if ($null -eq (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
 
 # --- Architecture selection ---
 $arch = $env:PROCESSOR_ARCHITECTURE
-if (-not $Builds.ContainsKey($arch)) {
+if (-not $Assets.ContainsKey($arch)) {
     Write-Output "FAIL: unsupported architecture: $arch"
     Write-State 'State' 'unsupported_arch'
     exit 8
 }
-$asset       = $Builds[$arch].Asset
-$expectedSha = $Builds[$arch].Sha.ToUpper()
-$url         = "$BaseUrl/$asset"
+$asset = $Assets[$arch]
+$url   = "$BaseUrl/$asset"
 Write-State 'Architecture'   $arch
 Write-State 'Asset'          $asset
 Write-State 'Target'         $ExtensionPath
@@ -174,94 +171,89 @@ foreach ($dir in @($OsqueryHome, $ExtensionsDir)) {
     }
 }
 
-# --- Idempotent fast-path: skip the download and move when the binary is current ---
-# osqueryd holds the extension binary open while loaded, so Move-Item -Force
-# fails with "Cannot create a file when that file already exists" against the
-# locked destination on a rerun. If the existing file already has the expected
-# SHA-256, there is nothing to do; otherwise stop the service before the move
-# to release the lock.
-$needsPlace = $true
+# --- Backup existing binary so we can restore on failure ---
+$hadExisting = $false
 if (Test-Path $ExtensionPath) {
     try {
-        $existingSha = (Get-FileHash -Path $ExtensionPath -Algorithm SHA256).Hash.ToUpper()
-        if ($existingSha -eq $expectedSha) {
-            $needsPlace = $false
-            Write-State 'Binary' "already current ($existingSha)"
-        } else {
-            Write-State 'Binary' "out of date; replacing"
-        }
+        Copy-Item -Path $ExtensionPath -Destination $BackupPath -Force
+        $hadExisting = $true
+        Write-State 'Backup' $BackupPath
     } catch {
-        Write-Output "WARN: could not hash existing ${ExtensionPath}: $($_.Exception.Message)"
+        Write-Output "WARN: could not back up ${ExtensionPath}: $($_.Exception.Message)"
     }
 }
 
-if ($needsPlace) {
-    $tempPath = Join-Path $env:TEMP "$ExtensionName-$([guid]::NewGuid()).download"
+# --- Download to a temp path, sanity-check the bytes ---
+$tempPath = Join-Path $env:TEMP "$ExtensionName-$([guid]::NewGuid()).download"
+try {
+    Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing -TimeoutSec 120
+} catch {
+    Write-Output "FAIL: download failed: $($_.Exception.Message)"
+    Write-Output "      Confirm $url is reachable from the host."
+    Write-State 'State' 'download_failed'
+    Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $BackupPath -Force -ErrorAction SilentlyContinue
+    exit 6
+}
+if (-not (Test-WindowsExecutable -Path $tempPath)) {
+    Write-Output "FAIL: downloaded file is not a Windows PE executable (MZ header missing or file too small)."
+    Write-Output "      Confirm the release at https://github.com/$GithubRepo/releases/latest has $asset."
+    Write-State 'State' 'invalid_payload'
+    Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $BackupPath -Force -ErrorAction SilentlyContinue
+    exit 6
+}
+Write-State 'Validated' 'MZ header ok'
+
+# --- Stop service, kill lingering child, move into place ---
+$serviceWasStopped = $false
+if ((Get-Service -Name $ServiceName).Status -eq 'Running') {
     try {
-        Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing -TimeoutSec 120
+        Stop-Service -Name $ServiceName -Force
+        $serviceWasStopped = $true
     } catch {
-        Write-Output "FAIL: download failed: $($_.Exception.Message)"
-        Write-Output "      Confirm $url is reachable from the host."
-        Write-State 'State' 'download_failed'
+        Write-Output "FAIL: could not stop ${ServiceName}: $($_.Exception.Message)"
+        Write-State 'State' 'stop_failed'
         Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
-        exit 6
+        exit 5
     }
-    $actualSha = (Get-FileHash -Path $tempPath -Algorithm SHA256).Hash.ToUpper()
-    if ($actualSha -ne $expectedSha) {
-        Write-Output "FAIL: SHA-256 mismatch. expected=$expectedSha actual=$actualSha"
-        Write-State 'State' 'checksum_mismatch'
-        Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
-        exit 7
-    }
-    Write-State 'SHA-256' "ok ($actualSha)"
-
-    # Stop Fleet osquery before the move so osqueryd releases the binary. The
-    # final restart at the bottom brings it back up.
-    $serviceWasStopped = $false
-    if ((Get-Service -Name $ServiceName).Status -eq 'Running') {
-        try {
-            Stop-Service -Name $ServiceName -Force
-            $serviceWasStopped = $true
-        } catch {
-            Write-Output "FAIL: could not stop ${ServiceName} to replace the binary: $($_.Exception.Message)"
-            Write-State 'State' 'stop_failed'
-            Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
-            exit 5
-        }
-    }
-
-    # osqueryd does not always tear down its autoloaded extension children
-    # when the service stops on Windows, and the extension process keeps the
-    # .ext.exe locked. Kill any lingering windows_yellowkey* process and wait
-    # briefly for the file handle to release before the move.
-    Get-Process -Name "$ExtensionName*" -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-
-    # Retry the move for a few seconds in case the OS hasn't yet released the
-    # handle. On Windows, file-rename-over-existing fails with "Cannot create
-    # a file when that file already exists" until every handle drops.
-    $moveOk = $false
-    $moveErr = $null
-    for ($try = 0; $try -lt 5; $try++) {
-        try {
-            Move-Item -Path $tempPath -Destination $ExtensionPath -Force
-            $moveOk = $true
-            break
-        } catch {
-            $moveErr = $_
-            Start-Sleep -Seconds 1
-        }
-    }
-    if (-not $moveOk) {
-        Write-Output "FAIL: could not move to ${ExtensionPath}: $($moveErr.Exception.Message)"
-        Write-State 'State' 'move_failed'
-        Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
-        if ($serviceWasStopped) { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue }
-        exit 4
-    }
-    Write-State 'Placed' $ExtensionPath
 }
+
+# osqueryd does not always tear down its autoloaded extension children when
+# the service stops on Windows, and the extension process keeps the
+# .ext.exe locked. Kill any lingering process and wait briefly for the
+# handle to release.
+Get-Process -Name "$ExtensionName*" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
+# Retry the move for a few seconds in case the OS hasn't released the
+# handle. File-rename-over-existing fails with "Cannot create a file when
+# that file already exists" until every handle drops.
+$moveOk = $false
+$moveErr = $null
+for ($try = 0; $try -lt 5; $try++) {
+    try {
+        Move-Item -Path $tempPath -Destination $ExtensionPath -Force
+        $moveOk = $true
+        break
+    } catch {
+        $moveErr = $_
+        Start-Sleep -Seconds 1
+    }
+}
+if (-not $moveOk) {
+    Write-Output "FAIL: could not move to ${ExtensionPath}: $($moveErr.Exception.Message)"
+    Write-State 'State' 'move_failed'
+    Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+    if ($hadExisting -and (Test-Path $BackupPath)) {
+        Move-Item -Path $BackupPath -Destination $ExtensionPath -Force -ErrorAction SilentlyContinue
+        Write-Output "      Restored previous binary from backup."
+    }
+    if ($serviceWasStopped) { Start-Service -Name $ServiceName -ErrorAction SilentlyContinue }
+    exit 4
+}
+Write-State 'Placed' $ExtensionPath
 
 try {
     Set-HardenedAcl -Path $ExtensionPath -IsDirectory $false
@@ -271,7 +263,7 @@ try {
     exit 4
 }
 
-# --- extensions.load: add our path if missing, write ASCII (no BOM) ---
+# --- extensions.load: add our path if missing, write ASCII no-BOM ---
 $loaderChanged = $false
 $existing = @()
 if (Test-Path $LoaderPath) {
@@ -281,8 +273,8 @@ if (Test-Path $LoaderPath) {
 if ($existing -notcontains $ExtensionPath) {
     $existing += $ExtensionPath
     try {
-        # ASCII no-BOM: a UTF-16 or UTF-8-BOM file makes osquery skip the loader
-        # and silently load zero extensions.
+        # ASCII no-BOM: a UTF-16 or UTF-8-BOM file makes osquery skip the
+        # loader and silently load zero extensions.
         [System.IO.File]::WriteAllLines($LoaderPath, $existing, [System.Text.ASCIIEncoding]::new())
     } catch {
         Write-Output "FAIL: could not write ${LoaderPath}: $($_.Exception.Message)"
@@ -303,9 +295,6 @@ try {
 }
 
 # --- Bring Fleet osquery back to Running ---
-# Start if stopped (we stopped it earlier for the move). Restart if running
-# and we changed something. Leave it alone on a true no-op rerun, since the
-# extension is already loaded and the policy would not have re-triggered.
 $svc = Get-Service -Name $ServiceName
 if ($svc.Status -ne 'Running') {
     try {
@@ -316,7 +305,7 @@ if ($svc.Status -ne 'Running') {
         exit 5
     }
     Write-State 'Service' 'started'
-} elseif ($needsPlace -or $loaderChanged) {
+} elseif ($loaderChanged) {
     try {
         Restart-Service -Name $ServiceName -Force
     } catch {
@@ -326,7 +315,7 @@ if ($svc.Status -ne 'Running') {
     }
     Write-State 'Service' 'restarted'
 } else {
-    Write-State 'Service' 'unchanged (no work to do)'
+    Write-State 'Service' 'running'
 }
 
 Start-Sleep -Seconds 5
@@ -338,8 +327,13 @@ if ($svc.Status -ne 'Running') {
     exit 5
 }
 
+# Clean up the backup now that the install succeeded.
+if (Test-Path $BackupPath) {
+    Remove-Item -Path $BackupPath -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output ""
-Write-Output "OK: installed $ExtensionName v$ExtensionVersion at $ExtensionPath."
+Write-Output "OK: installed $ExtensionName at $ExtensionPath."
 Write-Output "    osqueryd will autoload the binary via $LoaderPath on the next start."
 Write-Output "    Verify in Fleet (live query):"
 Write-Output "      SELECT 1 FROM osquery_registry"
