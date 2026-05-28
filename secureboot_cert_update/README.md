@@ -98,7 +98,19 @@ make deps
 make windows
 ```
 
+## Install
+
+Use the included `install-secureboot-cert-update-extension.ps1` via Fleet's script execution (or run it directly on the host in an elevated PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-secureboot-cert-update-extension.ps1
+```
+
+The installer downloads the architecture-matching binary from this repo's latest release, verifies its SHA-256, places it under `C:\Program Files\osquery\extensions\`, adds the path to `C:\Program Files\osquery\extensions.load`, hardens the ACLs, and restarts the `Fleet osquery` service. Idempotent: rerunning is a no-op when the binary already matches.
+
 ## Usage with Fleet
+
+For a quick interactive test without deploying:
 
 ```powershell
 'C:\Program Files\Orbit\bin\orbit\orbit.exe' shell -- --extension .\secureboot_cert_update-amd64.exe --allow-unsafe
@@ -126,10 +138,11 @@ WHERE needs_action = 1;
 
 ```
 secureboot_cert_update/
-├── main.go      # Extension code + state machine
-├── go.mod       # Module definition
-├── Makefile     # Cross-build for amd64/arm64 Windows
-└── README.md    # This file
+├── main.go                                       # Extension code + state machine
+├── go.mod                                        # Module definition
+├── Makefile                                      # Cross-build for amd64/arm64 Windows
+├── install-secureboot-cert-update-extension.ps1  # Automated installer
+└── README.md                                     # This file
 ```
 
 ## Requirements
