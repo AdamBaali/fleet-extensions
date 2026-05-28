@@ -18,6 +18,7 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 | [brew_outdated](brew_outdated/README.md)           | Quickly surface out-of-date Homebrew packages | macOS |
 | [softwareupdate](softwareupdate/README.md)         | Pending Apple software updates from `softwareupdate --list` | macOS |
 | [secureboot_cert_update](secureboot_cert_update/README.md) | Secure Boot 2023 certificate rollout status and recommended actions | Windows |
+| [windows_yellowkey](windows_yellowkey/README.md) | Per-host verdict for the YellowKey BitLocker bypass (CVE-2026-45585) | Windows |
 
 ## Extension Details
 
@@ -90,6 +91,12 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 - **Binaries:** `secureboot_cert_update-amd64.exe`, `secureboot_cert_update-arm64.exe`
 - **Tables:** `secureboot_cert_update`
 
+### [windows_yellowkey](windows_yellowkey/README.md)
+- **Description:** Returns one row of per-host verdict for the YellowKey BitLocker bypass (CVE-2026-45585). Reads OS, WinRE state, BitLocker key protectors, and a mitigation marker to derive `state`.
+- **Platforms:** Windows (amd64, arm64)
+- **Binaries:** `windows_yellowkey-amd64.exe`, `windows_yellowkey-arm64.exe`
+- **Tables:** `windows_yellowkey`
+
 ## Automated Builds
 
 This repository uses GitHub Actions to automatically build and release extensions when changes are pushed to the `main` branch. Each extension has its own workflow that:
@@ -131,13 +138,13 @@ Each extension is self-contained in its own directory. To build an extension:
      ```
      This produces:
      - `brew_list.ext` (works on macOS and Linux with Homebrew/Linuxbrew)
-   - For **Windows-only extension** (`secureboot_cert_update`):
+   - For **Windows-only extensions** (`secureboot_cert_update`, `windows_yellowkey`):
      ```bash
      make build
      ```
      This produces:
-     - `secureboot_cert_update-amd64.exe` (for 64-bit Intel/AMD Windows)
-     - `secureboot_cert_update-arm64.exe` (for 64-bit ARM Windows)
+     - `<extension>-amd64.exe` (for 64-bit Intel/AMD Windows)
+     - `<extension>-arm64.exe` (for 64-bit ARM Windows)
    - For **Windows binaries from cross-platform extension** (`nuget_packages`):
      ```bash
      make windows

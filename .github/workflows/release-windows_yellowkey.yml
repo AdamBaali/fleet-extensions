@@ -1,0 +1,69 @@
+name: Release windows_yellowkey
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'windows_yellowkey/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: windows_yellowkey/go.sum
+
+      - name: Build Windows binaries
+        run: |
+          cd windows_yellowkey
+          make deps
+          make build
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows_yellowkey-binaries
+          path: |
+            windows_yellowkey/windows_yellowkey-amd64.exe
+            windows_yellowkey/windows_yellowkey-arm64.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Fleet Extensions Release
+          body: |
+            This release includes updated binaries for the following extensions:
+
+            | Extension                 | Built in this release |
+            |---------------------------|----------------------|
+            | apple_network_quality     |                      |
+            | brew_list                 |                      |
+            | brew_outdated             |                      |
+            | homebrew_info             |                      |
+            | local_network_permissions |                      |
+            | macos_compatibility       |                      |
+            | mise                      |                      |
+            | msft_defender             |                      |
+            | nuget_packages            |                      |
+            | santa                     |                      |
+            | secureboot_cert_update    |                      |
+            | snap_packages             |                      |
+            | softwareupdate            |                      |
+            | system_profiler           |                      |
+            | ubuntu_pro                |                      |
+            | windows_yellowkey         | ✅                    |
+
+            See attached assets for binaries.
+          files: |
+            windows_yellowkey/windows_yellowkey-amd64.exe
+            windows_yellowkey/windows_yellowkey-arm64.exe
+          draft: false
+          prerelease: false
