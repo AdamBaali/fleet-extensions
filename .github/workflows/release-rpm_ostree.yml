@@ -1,0 +1,69 @@
+name: Release rpm_ostree
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'rpm_ostree/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build binaries
+        run: |
+          cd rpm_ostree
+          make deps
+          make test
+          make build
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm_ostree-binaries
+          path: |
+            rpm_ostree/rpm_ostree-amd64.ext
+            rpm_ostree/rpm_ostree-arm64.ext
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Fleet Extensions Release
+          body: |
+            This release includes updated binaries for the following extensions:
+
+            | Extension                 | Built in this release |
+            |---------------------------|----------------------|
+            | apple_network_quality     |                      |
+            | brew_list                 |                      |
+            | brew_outdated             |                      |
+            | homebrew_info             |                      |
+            | local_network_permissions |                      |
+            | macos_compatibility       |                      |
+            | mise                      |                      |
+            | msft_defender             |                      |
+            | nuget_packages            |                      |
+            | rpm_ostree                | ✅                    |
+            | santa                     |                      |
+            | secureboot_cert_update    |                      |
+            | snap_packages             |                      |
+            | softwareupdate            |                      |
+            | system_profiler           |                      |
+            | ubuntu_pro                |                      |
+
+            See attached assets for binaries.
+          files: |
+            rpm_ostree/rpm_ostree-amd64.ext
+            rpm_ostree/rpm_ostree-arm64.ext
+          draft: false
+          prerelease: false

@@ -19,6 +19,7 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 | [softwareupdate](softwareupdate/README.md)         | Pending Apple software updates from `softwareupdate --list` | macOS |
 | [secureboot_cert_update](secureboot_cert_update/README.md) | Secure Boot 2023 certificate rollout status and recommended actions | Windows |
 | [windows_yellowkey](windows_yellowkey/README.md) | Per-host verdict for the YellowKey BitLocker bypass (CVE-2026-45585) | Windows |
+| [rpm_ostree](rpm_ostree/README.md) | rpm-ostree deployment state as a native osquery table for atomic hosts | Linux |
 
 ## Extension Details
 
@@ -97,6 +98,12 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 - **Binaries:** `windows_yellowkey-amd64.exe`, `windows_yellowkey-arm64.exe`
 - **Tables:** `windows_yellowkey`
 
+### [rpm_ostree](rpm_ostree/README.md)
+- **Description:** Exposes rpm-ostree deployment state for atomic / image-mode hosts (Fedora Silverblue/Kinoite, Universal Blue / Bluefin, Fedora CoreOS) by parsing `rpm-ostree status --json`. One row per deployment, including the booted/staged flags, source container image reference, and layered packages.
+- **Platforms:** Linux (rpm-ostree based atomic hosts)
+- **Binaries:** `rpm_ostree-amd64.ext`, `rpm_ostree-arm64.ext`
+- **Tables:** `rpm_ostree_deployments`
+
 ## Automated Builds
 
 This repository uses GitHub Actions to automatically build and release extensions when changes are pushed to the `main` branch. Each extension has its own workflow that:
@@ -125,13 +132,13 @@ Each extension is self-contained in its own directory. To build an extension:
      This produces:
      - A universal binary: `<extension>.ext` (works on both Intel and Apple Silicon Macs)
      - Architecture-specific binaries: `<extension>-x86_64.ext` (Intel), `<extension>-arm64.ext` (Apple Silicon)
-   - For **Linux extension** (`snap_packages`):
+   - For **Linux extensions** (`snap_packages`, `rpm_ostree`):
      ```bash
      make build
      ```
      This produces:
-     - `snap_packages-amd64.ext` (for x86_64/amd64 Linux)
-     - `snap_packages-arm64.ext` (for ARM64 Linux)
+     - `<extension>-amd64.ext` (for x86_64/amd64 Linux)
+     - `<extension>-arm64.ext` (for ARM64 Linux)
    - For **Cross-platform extension** (`brew_list`):
      ```bash
      make build
