@@ -75,14 +75,26 @@ Use the included `install-rpm-ostree-extension.sh` via Fleet's script execution 
 sudo ./install-rpm-ostree-extension.sh
 ```
 
-The script:
+The installer is built for Fleet's script execution: it is idempotent (rerunning re-asserts the binary, loader, perms, and orbit config), emits structured `key : value` output, and uses numbered exit codes so a failed run is legible in Fleet's script results. It:
 
-1. Verifies the host is rpm-ostree based and detects the architecture (amd64/arm64)
-2. Downloads the matching binary from this repo's latest GitHub release
-3. Installs it to `/var/lib/fleetd/extensions/rpm_ostree.ext`, owned `root:root`, mode `0700`
-4. Writes the autoload file `/var/lib/fleetd/extensions.load` (mode `0640`)
-5. Sets `ORBIT_ROOT_DIR=/var/lib/fleetd` and `ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD=/var/lib/fleetd/extensions.load` in `/etc/default/orbit`
-6. Restarts `orbit.service`
+1. Pre-flight checks: runs as root, host is rpm-ostree based, `orbit.service` exists
+2. Detects the architecture (amd64/arm64) and downloads the matching binary from this repo's latest GitHub release
+3. Validates the download is an ELF binary for the host architecture (magic + `e_machine`), backing up and restoring the previous binary on any failure
+4. Installs it to `/var/lib/fleetd/extensions/rpm_ostree.ext`, owned `root:root`, mode `0700` (osquery refuses a non-root-owned or world-writable extension)
+5. Writes the autoload file `/var/lib/fleetd/extensions.load` (mode `0640`)
+6. Sets `ORBIT_ROOT_DIR=/var/lib/fleetd` and `ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD=/var/lib/fleetd/extensions.load` in `/etc/default/orbit`
+7. Restarts `orbit.service` and confirms it returns to active
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Installed; orbit back to active |
+| 2 | Not run as root |
+| 3 | `orbit.service` not present (is fleetd installed?) |
+| 4 | Filesystem/config operation failed |
+| 5 | orbit did not return to active after restart |
+| 6 | Download failed or asset is not a valid ELF for this architecture |
+| 7 | rpm-ostree not found (not an atomic host) |
+| 8 | Unsupported architecture |
 
 > **Why not `/opt/orbit` / `/etc/osquery` like the Ubuntu extensions?**
 > On image-mode systems `/opt` is a read-only symlink to `/var/opt`, and orbit exposes `/opt/orbit/*` read-only. Nothing can be written under `/opt`, and a systemd `.mount` for `/opt/orbit` fails as "not canonical (contains a symlink)". Keeping the binary and autoload file under `/var/lib/fleetd` and pointing orbit at them with `ORBIT_ROOT_DIR` is the supported path.
@@ -91,6 +103,13 @@ Confirm the extension loaded:
 
 ```bash
 journalctl -b -u orbit.service | grep -i rpm_ostree
+```
+
+Or verify from Fleet with a live query that the table registered and is active:
+
+```sql
+SELECT 1 FROM osquery_registry
+WHERE registry = 'table' AND name = 'rpm_ostree_deployments' AND active = 1;
 ```
 
 ## Testing on an atomic host (without the Fleet UI)
