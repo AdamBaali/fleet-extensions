@@ -82,8 +82,8 @@ The installer is built for Fleet's script execution: it is idempotent (rerunning
 3. Validates the download is an ELF binary for the host architecture (magic + `e_machine`), backing up and restoring the previous binary on any failure
 4. Installs it to `/var/lib/fleetd/extensions/rpm_ostree.ext`, owned `root:root`, mode `0700` (osquery refuses a non-root-owned or world-writable extension)
 5. Writes the autoload file `/var/lib/fleetd/extensions.load` (mode `0640`)
-6. Sets `ORBIT_ROOT_DIR=/var/lib/fleetd` and `ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD=/var/lib/fleetd/extensions.load` in `/etc/default/orbit`
-7. Restarts `orbit.service` and confirms it returns to active
+6. Points orbit at `/var/lib/fleetd` by setting `ORBIT_ROOT_DIR` and `ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD` via a systemd drop-in at `/etc/systemd/system/orbit.service.d/10-fleet-extensions.conf` (and mirrors them into `/etc/default/orbit`)
+7. Runs `systemctl daemon-reload`, restarts `orbit.service`, and confirms it returns to active
 
 | Exit code | Meaning |
 |---|---|
@@ -96,8 +96,12 @@ The installer is built for Fleet's script execution: it is idempotent (rerunning
 | 7 | rpm-ostree not found (not an atomic host) |
 | 8 | Unsupported architecture |
 
-> **Why not `/opt/orbit` / `/etc/osquery` like the Ubuntu extensions?**
-> On image-mode systems `/opt` is a read-only symlink to `/var/opt`, and orbit exposes `/opt/orbit/*` read-only. Nothing can be written under `/opt`, and a systemd `.mount` for `/opt/orbit` fails as "not canonical (contains a symlink)". Keeping the binary and autoload file under `/var/lib/fleetd` and pointing orbit at them with `ORBIT_ROOT_DIR` is the supported path.
+> **Why this layout (image-mode/atomic precedent)?**
+> On image-mode systems (Bluefin/Silverblue/CoreOS) fleetd is rpm-ostree *layered*, so `/usr` and orbit's default root `/opt/orbit` are read-only, while `/etc` and `/var` are writable (`/opt` is itself a read-only symlink to `/var/opt`, and a `.mount` for `/opt/orbit` fails as "not canonical (contains a symlink)"). So the binary and autoload file live under `/var/lib/fleetd`, and orbit is relocated there with `ORBIT_ROOT_DIR` + `ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD`.
+>
+> Those vars are delivered through a **systemd drop-in** (`/etc/systemd/system/orbit.service.d/10-fleet-extensions.conf`) rather than only editing the package-managed `/etc/default/orbit`. The drop-in is the canonical systemd override and survives fleetd/image upgrades, whereas a fleetd package upgrade overwrites `/etc/default/orbit` ([fleetdm/fleet#18365](https://github.com/fleetdm/fleet/issues/18365)). The installer writes both for belt-and-suspenders; the drop-in wins.
+>
+> To remove: delete `/etc/systemd/system/orbit.service.d/10-fleet-extensions.conf`, the binary, and the loader, then `systemctl daemon-reload && systemctl restart orbit`.
 
 Confirm the extension loaded:
 

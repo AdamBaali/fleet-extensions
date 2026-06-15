@@ -9,14 +9,20 @@
 # self-verifying tail that prints the Fleet live queries to confirm the table
 # is active. Rerunning re-asserts the binary, loader, perms, and orbit config.
 #
-# Pattern mirrors this repo's windows_yellowkey installer, adapted for Linux.
 # Binaries are produced by CI on push to main and attached to the `latest`
 # release, so this script always pulls from there; no version needs bumping.
 #
-# Why /var/lib/fleetd and not /opt: on image-mode systems /opt is a read-only
-# symlink to /var/opt and orbit exposes /opt/orbit/* read-only, so the binary
-# and loader live under /var/lib/fleetd and orbit is pointed at them via
-# ORBIT_ROOT_DIR + ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD in /etc/default/orbit.
+# Image-mode/atomic layout. On image-mode systems (Bluefin/Silverblue/CoreOS)
+# fleetd is rpm-ostree *layered*, so /usr and orbit's default root /opt/orbit
+# are read-only, while /etc and /var are writable. So:
+#   - the binary + loader live under /var/lib/fleetd (writable), and
+#   - orbit is pointed at them with ORBIT_ROOT_DIR and
+#     ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD set via a systemd drop-in under
+#     /etc/systemd/system/orbit.service.d/. The drop-in is the canonical
+#     systemd override and, unlike an edit to the package-managed
+#     /etc/default/orbit (which a fleetd upgrade overwrites, fleetdm/fleet
+#     #18365), it survives package/image updates. We also mirror the two vars
+#     into /etc/default/orbit for compatibility with the documented fix.
 # osquery refuses an extension that is not root-owned or is world-writable, so
 # the binary is installed root:root mode 0700.
 #
@@ -48,6 +54,8 @@ EXTENSION_DIR="$ORBIT_ROOT_DIR/extensions"
 EXTENSION_PATH="$EXTENSION_DIR/$EXTENSION_NAME.ext"   # .ext suffix required by osquery
 AUTOLOAD_FILE="$ORBIT_ROOT_DIR/extensions.load"
 ORBIT_DEFAULTS="/etc/default/orbit"
+ORBIT_DROPIN_DIR="/etc/systemd/system/orbit.service.d"
+ORBIT_DROPIN="$ORBIT_DROPIN_DIR/10-fleet-extensions.conf"
 SERVICE_NAME="orbit.service"
 BACKUP_PATH="$EXTENSION_PATH.backup.$(date +%Y%m%d_%H%M%S)"
 
@@ -149,7 +157,26 @@ chown root:root "$AUTOLOAD_FILE" && chmod 0640 "$AUTOLOAD_FILE" \
     || fail "could not set perms on $AUTOLOAD_FILE" "loader_perms_failed" 4
 write_state "extensions.load" "written"
 
-# --- Point orbit at /var/lib/fleetd and our loader --------------------------
+# --- Point orbit at /var/lib/fleetd via a systemd drop-in (image-mode safe) -
+# The drop-in is the canonical override and survives fleetd/image upgrades; an
+# edit to the package-managed /etc/default/orbit gets overwritten on upgrade.
+if ! mkdir -p "$ORBIT_DROPIN_DIR"; then
+    fail "could not create $ORBIT_DROPIN_DIR" "dropin_dir_failed" 4
+fi
+{
+    cat > "$ORBIT_DROPIN" <<EOF
+# Managed by install-rpm-ostree-extension.sh — relocates orbit's root to a
+# writable path on image-mode hosts and autoloads the rpm_ostree extension.
+[Service]
+Environment=ORBIT_ROOT_DIR=$ORBIT_ROOT_DIR
+Environment=ORBIT_OSQUERY_EXTENSIONS_AUTOLOAD=$AUTOLOAD_FILE
+EOF
+    chmod 0644 "$ORBIT_DROPIN"
+} || fail "could not write $ORBIT_DROPIN" "dropin_write_failed" 4
+write_state "orbit drop-in" "$ORBIT_DROPIN"
+
+# Mirror the same vars into the package EnvironmentFile for compatibility with
+# the documented fix (harmless if a later upgrade reverts it; the drop-in wins).
 upsert_default() {
     local key="$1" value="$2" file="$3"
     touch "$file"
@@ -166,7 +193,10 @@ upsert_default() {
 } || fail "could not update $ORBIT_DEFAULTS" "orbit_defaults_failed" 4
 write_state "orbit defaults" "configured"
 
-# --- Restart orbit and confirm it comes back active -------------------------
+# --- Reload units (drop-in) and restart orbit, confirm it comes back active -
+if ! systemctl daemon-reload; then
+    fail "systemctl daemon-reload failed" "daemon_reload_failed" 4
+fi
 if ! systemctl restart "$SERVICE_NAME"; then
     [[ $had_existing -eq 1 && -f "$BACKUP_PATH" ]] && mv -f "$BACKUP_PATH" "$EXTENSION_PATH"
     fail "could not restart $SERVICE_NAME" "restart_failed" 5
@@ -182,6 +212,7 @@ rm -f "$BACKUP_PATH" 2>/dev/null || true
 
 echo ""
 echo "OK: installed $EXTENSION_NAME at $EXTENSION_PATH."
+echo "    orbit root + autoload set via $ORBIT_DROPIN (survives upgrades)."
 echo "    orbit autoloads the binary via $AUTOLOAD_FILE on restart."
 echo "    Confirm it loaded:"
 echo "      journalctl -b -u $SERVICE_NAME | grep -i $EXTENSION_NAME"
