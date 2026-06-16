@@ -52,12 +52,19 @@ else
   info "osqueryd/osqueryd is NOT a symlink (will fix)"
 fi
 
-# Step 2: Stop orbit service
+# Step 2: Stop orbit service (or skip if running via Fleet/orbit)
 echo ""
-info "Stopping orbit service..."
-run_cmd "$SUDO systemctl stop orbit.service"
-sleep 2
-ok "orbit stopped"
+info "Preparing to fix symlinks..."
+# Note: If running via Fleet, we can't stop orbit (it would kill this script)
+# So we'll just proceed and restart in background at the end
+if run_cmd "pgrep -f 'orbit.*--root-dir' > /dev/null 2>&1"; then
+  info "orbit is running - will restart in background after fixes"
+else
+  info "Stopping orbit service..."
+  run_cmd "$SUDO systemctl stop orbit.service"
+  sleep 2
+  ok "orbit stopped"
+fi
 
 # Step 3: Fix symlinks
 echo ""
@@ -128,9 +135,10 @@ fi
 # Step 6: Restart orbit
 echo ""
 info "Restarting orbit service..."
-run_cmd "$SUDO systemctl start orbit.service"
-sleep 5
-ok "orbit restarted"
+# Run restart in background to avoid hanging when executed via Fleet
+run_cmd "$SUDO sh -c 'systemctl restart orbit.service &'"
+sleep 8
+ok "orbit restart initiated (may take a moment)"
 
 # Step 7: Verify no symlink errors
 echo ""
