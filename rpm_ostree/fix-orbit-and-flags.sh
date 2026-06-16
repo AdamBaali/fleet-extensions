@@ -54,6 +54,10 @@ fi
 echo ""
 info "Creating symlinks..."
 
+# Ensure directories exist
+sudo mkdir -p /var/lib/fleetd/bin/orbit
+sudo mkdir -p /var/lib/fleetd/bin/osqueryd
+
 # Remove old files if they exist
 [ -e /var/lib/fleetd/bin/orbit/orbit ] && sudo rm -f /var/lib/fleetd/bin/orbit/orbit
 [ -e /var/lib/fleetd/bin/osqueryd/osqueryd ] && sudo rm -f /var/lib/fleetd/bin/osqueryd/osqueryd
