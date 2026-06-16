@@ -58,13 +58,9 @@ info "Creating symlinks..."
 sudo mkdir -p /var/lib/fleetd/bin/orbit
 sudo mkdir -p /var/lib/fleetd/bin/osqueryd
 
-# Remove old files if they exist
-[ -e /var/lib/fleetd/bin/orbit/orbit ] && sudo rm -f /var/lib/fleetd/bin/orbit/orbit
-[ -e /var/lib/fleetd/bin/osqueryd/osqueryd ] && sudo rm -f /var/lib/fleetd/bin/osqueryd/osqueryd
-
-# Create symlinks
-sudo ln -s "$ORBIT_TARGET" /var/lib/fleetd/bin/orbit/orbit
-sudo ln -s "$OSQUERYD_TARGET" /var/lib/fleetd/bin/osqueryd/osqueryd
+# Create symlinks (force overwrite if exists)
+sudo ln -sf "$ORBIT_TARGET" /var/lib/fleetd/bin/orbit/orbit
+sudo ln -sf "$OSQUERYD_TARGET" /var/lib/fleetd/bin/osqueryd/osqueryd
 ok "Symlinks created"
 
 # Step 4: Fix osquery.flags
