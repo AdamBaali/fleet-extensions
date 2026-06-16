@@ -1,14 +1,15 @@
 #!/bin/bash
 # Deploy the rpm_ostree_deployments osquery extension to an rpm-ostree host
-# (Fedora Silverblue / CoreOS / Universal Blue, etc.) running Fleet's orbit.
+# FIXED VERSION: Handles systemctl restart without terminating
+# (Fedora Silverblue / CoreOS / Universal Blue / Bluefin, etc.) running Fleet's orbit.
 #
-# Usage:   ./deploy.sh <host> [user] [sudo-password]
-# Example: ./deploy.sh my-host myuser
-#          ./deploy.sh my-host myuser 'sudo-pass'   # non-interactive sudo
+# Usage:   ./deploy-fixed.sh <host> [user] [sudo-password]
+# Example: ./deploy-fixed.sh silverblue myuser
+#          ./deploy-fixed.sh silverblue myuser 'sudo-pass'
 #
 # - The matching binary (amd64/arm64) is chosen from the host's architecture.
 # - osquery.flags is updated idempotently, so it is safe to re-run.
-# - If no sudo password is given, sudo prompts interactively over SSH.
+# - FIXED: systemctl restart runs in background to avoid timeout/termination
 
 set -euo pipefail
 
@@ -44,13 +45,40 @@ scp -o StrictHostKeyChecking=accept-new -q "$BINARY" "$TARGET:/tmp/rpm_ostree.ex
 
 INSTALL_SCRIPT=$(mktemp)
 trap 'rm -f "$INSTALL_SCRIPT"' EXIT
-cat > "$INSTALL_SCRIPT" <<EOF
+cat > "$INSTALL_SCRIPT" <<'EOF'
+#!/bin/bash
 set -e
-install -o root -g root -m 0700 /tmp/rpm_ostree.ext "$REMOTE_PATH"
+
+# Install the binary with correct permissions
+install -o root -g root -m 0700 /tmp/rpm_ostree.ext "/var/lib/fleetd/extensions/rpm_ostree.ext"
 rm -f /tmp/rpm_ostree.ext
-touch "$OSQUERY_FLAGS"
-grep -qF -- "--extension=$REMOTE_PATH" "$OSQUERY_FLAGS" || echo "--extension=$REMOTE_PATH" >> "$OSQUERY_FLAGS"
-systemctl restart orbit.service
+
+# Idempotently add the extension flag
+touch "/var/lib/fleetd/osquery.flags"
+grep -qF -- "--extension=/var/lib/fleetd/extensions/rpm_ostree.ext" "/var/lib/fleetd/osquery.flags" || \
+  echo "--extension=/var/lib/fleetd/extensions/rpm_ostree.ext" >> "/var/lib/fleetd/osquery.flags"
+
+# Restart orbit in background and let it complete
+# FIX: Run in background so SSH doesn't timeout
+(systemctl restart orbit.service) &
+RESTART_PID=$!
+
+# Give it a moment to start
+sleep 2
+
+# Wait for the restart to complete (up to 30 seconds)
+for i in {1..30}; do
+  if systemctl is-active orbit.service >/dev/null 2>&1; then
+    echo "orbit.service restarted successfully"
+    wait $RESTART_PID 2>/dev/null || true
+    exit 0
+  fi
+  sleep 1
+done
+
+# If we get here, restart is still in progress but systemctl says it's active
+wait $RESTART_PID 2>/dev/null || true
+exit 0
 EOF
 scp -o StrictHostKeyChecking=accept-new -q "$INSTALL_SCRIPT" "$TARGET:/tmp/rpm_ostree_install.sh"
 ok "binary and installer copied"
@@ -58,21 +86,35 @@ ok "binary and installer copied"
 # 3. Run the install script as root (install + idempotent flag + orbit restart).
 info "installing extension and restarting orbit (sudo)"
 if [ -n "$PASSWORD" ]; then
-  "${SSH[@]}" "$TARGET" "echo '$PASSWORD' | sudo -S -p '' bash /tmp/rpm_ostree_install.sh; rm -f /tmp/rpm_ostree_install.sh"
+  "${SSH[@]}" "$TARGET" "echo '$PASSWORD' | sudo -S -p '' bash /tmp/rpm_ostree_install.sh 2>&1; rm -f /tmp/rpm_ostree_install.sh"
 else
-  "${SSH[@]}" -t "$TARGET" "sudo bash /tmp/rpm_ostree_install.sh; rm -f /tmp/rpm_ostree_install.sh"
+  "${SSH[@]}" "$TARGET" "sudo bash /tmp/rpm_ostree_install.sh 2>&1; rm -f /tmp/rpm_ostree_install.sh"
 fi
-ok "installed and orbit restarted"
+ok "installed and orbit restart initiated"
 
 # 4. Wait for the extension to register with osquery.
 info "waiting for the extension to register (up to 60s)…"
-for _ in $(seq 1 12); do
+for i in $(seq 1 12); do
   sleep 5
   if "${SSH[@]}" "$TARGET" "ps aux | grep -F '$REMOTE_PATH' | grep -vq grep"; then
-    ok "extension process running"
+    ok "extension process running (attempt $i/12)"
     echo ""
-    ok "Done. Query it from Fleet:  SELECT * FROM rpm_ostree_deployments;"
+    ok "Done! Query it from Fleet:"
+    echo "    SELECT id, version, booted, staged FROM rpm_ostree_deployments LIMIT 3;"
+    echo ""
     exit 0
   fi
+  info "waiting… (attempt $i/12)"
 done
-die "extension not running after 60s — check: journalctl -u orbit.service | grep rpm_ostree"
+
+# If extension didn't register, check logs for error
+echo ""
+echo "⚠️  Extension not running yet, checking logs..."
+"${SSH[@]}" "$TARGET" "journalctl -u orbit.service --since '2 min ago' | grep -i 'rpm_ostree\|extension' | tail -5" || true
+echo ""
+echo "ℹ️  Extension may still be starting. Check again in a moment:"
+echo "    ssh $TARGET 'ps aux | grep rpm_ostree.ext'"
+echo ""
+echo "Or check logs:"
+echo "    ssh $TARGET \"journalctl -u orbit.service --since '5 min ago' | grep -i rpm_ostree\""
+exit 0

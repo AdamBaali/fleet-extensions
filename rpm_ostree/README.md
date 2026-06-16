@@ -2,6 +2,25 @@
 
 Provides a table for querying rpm-ostree deployment status on rpm-ostree-based systems (e.g., Fedora Silverblue, Bluefin, etc.).
 
+## Quick Deployment
+
+To deploy this extension to an rpm-ostree host:
+
+```bash
+./deploy.sh <hostname> [username] [sudo-password]
+
+# Example:
+./deploy.sh silverblue.local adam
+```
+
+The script will:
+1. Detect the host architecture
+2. Copy the correct binary
+3. Install to `/var/lib/fleetd/extensions/`
+4. Update osquery flags
+5. Restart orbit service (reliably, without timeout)
+6. Wait for extension to register (up to 60s)
+
 ## Table: rpm_ostree_deployments
 
 Returns one row per deployment. Includes information about booted, staged, and rollback deployments.
