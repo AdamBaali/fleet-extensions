@@ -1,0 +1,27 @@
+Package: adduser
+Status: install ok installed
+Priority: important
+Architecture: all
+Version: 3.137ubuntu1
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Description: add and remove users and groups
+ This package includes the 'adduser' and 'deluser' commands.
+
+Package: libc6
+Status: install ok installed
+Architecture: amd64
+Multi-Arch: same
+Version: 2.39-0ubuntu8
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+
+Package: removed-pkg
+Status: deinstall ok config-files
+Architecture: amd64
+Version: 1.0
+Maintainer: Someone <a@example.com>
+
+Package: curl
+Status: install ok installed
+Architecture: amd64
+Version: 8.5.0-2ubuntu10
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>

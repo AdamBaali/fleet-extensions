@@ -1,0 +1,6 @@
+2026-09-01 09:00:00 startup archives unpack
+2026-09-01 09:00:01 install curl:amd64 <none> 8.5.0-2ubuntu10
+2026-09-01 09:00:02 status half-installed curl:amd64 8.5.0-2ubuntu10
+2026-09-01 09:00:03 status installed curl:amd64 8.5.0-2ubuntu10
+2026-09-02 10:00:00 upgrade curl:amd64 8.5.0-2ubuntu10 8.5.0-2ubuntu11
+garbage line

@@ -1,0 +1,10 @@
+Executable=/Applications/Example Editor.app/Contents/MacOS/editor
+Identifier=com.example.editor
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20500 size=1234 flags=0x10000(runtime) hashes=27+7 location=embedded
+Signature size=8987
+Authority=Developer ID Application: Example Inc (ABCDE12345)
+Authority=Developer ID Certification Authority
+Authority=Apple Root CA
+Timestamp=1 Mar 2026 at 10:00:00
+TeamIdentifier=ABCDE12345

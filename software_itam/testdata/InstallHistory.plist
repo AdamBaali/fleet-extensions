@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>date</key><date>2026-03-01T10:00:00Z</date>
+		<key>displayName</key><string>Example Editor</string>
+		<key>displayVersion</key><string>2.4.1</string>
+		<key>processName</key><string>appstoreagent</string>
+	</dict>
+	<dict>
+		<key>date</key><date>2025-01-15T08:30:00Z</date>
+		<key>displayName</key><string>example editor</string>
+		<key>displayVersion</key><string>1.0</string>
+		<key>processName</key><string>appstoreagent</string>
+	</dict>
+	<dict>
+		<key>date</key><date>2026-05-02T12:00:00Z</date>
+		<key>displayName</key><string>macOS 16.1</string>
+		<key>processName</key><string>softwareupdated</string>
+	</dict>
+	<dict>
+		<key>date</key><date>2026-06-01T12:00:00Z</date>
+		<key>displayName</key><string></string>
+	</dict>
+</array>
+</plist>

@@ -19,6 +19,7 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 | [softwareupdate](softwareupdate/README.md)         | Pending Apple software updates from `softwareupdate --list` | macOS |
 | [secureboot_cert_update](secureboot_cert_update/README.md) | Secure Boot 2023 certificate rollout status and recommended actions | Windows |
 | [windows_yellowkey](windows_yellowkey/README.md) | Per-host verdict for the YellowKey BitLocker bypass (CVE-2026-45585) | Windows |
+| [software_itam](software_itam/README.md) | Publisher, install date and first seen date per app or package, for IT asset management exports | macOS, Windows, Linux |
 
 ## Extension Details
 
@@ -97,6 +98,12 @@ A collection of Go-based osquery extensions for Fleet and osquery, providing add
 - **Binaries:** `windows_yellowkey-amd64.exe`, `windows_yellowkey-arm64.exe`
 - **Tables:** `windows_yellowkey`
 
+### [software_itam](software_itam/README.md)
+- **Description:** One row per app (macOS), program (Windows) or RPM/DEB package (Linux) with a publisher name, the best install date and its source, every install date candidate, and the first time the extension saw the item. Fills the fields Fleet's software inventory doesn't return yet, for IT asset management exports such as ServiceNow.
+- **Platforms:** macOS (Intel and Apple Silicon), Windows (amd64, arm64), Linux (amd64, arm64)
+- **Binaries:** `software_itam-x86_64.ext`, `software_itam-arm64.ext`, `software_itam-amd64.ext`, `software_itam-linux-arm64.ext`, `software_itam-amd64.exe`, `software_itam-arm64.exe`
+- **Tables:** `software_itam`
+
 ## Automated Builds
 
 This repository uses GitHub Actions to automatically build and release extensions when changes are pushed to the `main` branch. Each extension has its own workflow that:
@@ -145,6 +152,11 @@ Each extension is self-contained in its own directory. To build an extension:
      This produces:
      - `<extension>-amd64.exe` (for 64-bit Intel/AMD Windows)
      - `<extension>-arm64.exe` (for 64-bit ARM Windows)
+   - For **Cross-platform extension without CGO** (`software_itam`):
+     ```bash
+     make build
+     ```
+     This produces macOS (`-x86_64.ext`, `-arm64.ext`), Linux (`-amd64.ext`, `-linux-arm64.ext`) and Windows (`-amd64.exe`, `-arm64.exe`) binaries from any OS.
    - For **Windows binaries from cross-platform extension** (`nuget_packages`):
      ```bash
      make windows
